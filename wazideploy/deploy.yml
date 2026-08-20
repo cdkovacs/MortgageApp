@@ -1,0 +1,61 @@
+# Wazi Deploy - Deployment Recipe
+# MortgageApplication
+#
+# This file defines the deployment workflow for MortgageApplication artifacts.
+# It is consumed by: wazideploy-deploy -w deploy.yml -e environment.yml -p <package.tar>
+#
+# Artifact types present in the DBB pipeline package (from BuildReport.json deployType):
+#   MAPLOAD   — BMS mapset load modules (EPSMLIS, EPSMORT) in bin/mapload/
+#   LOAD      — COBOL load modules (EPSCMORT, EPSCSMRD, EPSCSMRT, EPSNBRVL) in bin/load/
+#   DBRM      — DB2 bind members (EPSCMORT) in bin/dbrm/
+#
+# Reference: https://www.ibm.com/docs/en/developer-for-zos/16.0?topic=deploy-deployment-method-file
+
+---
+apiVersion: deploy.ibm.com/v1
+kind: DeploymentMethod
+activities:
+  - name: deploy-mortgageapplication
+    description: Deploy MortgageApplication artifacts to z/OS
+    actions:
+
+      # ------------------------------------------------------------------
+      # BMS mapset load modules — deployType MAPLOAD in bin/mapload/
+      # ------------------------------------------------------------------
+      - name: deploy-bms-mapsets
+        description: Deploy BMS mapset load modules to CICS load library
+        is_artifact: true
+        types:
+          - name: MAPLOAD
+        properties:
+          - key: name_filter
+            value: "EPSMORT|EPSMLIS"
+        steps:
+          - name: MEMBER_COPY
+            is_artifact: true
+            types:
+              - name: MAPLOAD
+            properties:
+              - key: name_filter
+                value: "EPSMORT|EPSMLIS"
+              - key: pattern
+                value: maploads
+
+      - name: deploy-load-modules
+        description: Deploy COBOL load modules to load library
+        is_artifact: true
+        types:
+          - name: LOAD
+        properties:
+          - key: name_filter
+            value: "EPSCMORT|EPSCSMRD|EPSCSMRT|EPSNBRVL"
+        steps:
+          - name: MEMBER_COPY
+            is_artifact: true
+            types:
+              - name: LOAD
+            properties:
+              - key: name_filter
+                value: "EPSCMORT|EPSCSMRD|EPSCSMRT|EPSNBRVL"
+              - key: pattern
+                value: loadmods

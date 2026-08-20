@@ -1,0 +1,36 @@
+# Wazi Deploy - Acceptance Environment
+# MortgageApplication
+#
+# QA / user acceptance testing environment.
+# Pass to wazideploy-deploy with:  -ef environments/zos.dev.acceptance.yml
+
+---
+environments:
+
+  - name: zos.dev.acceptance
+    description: Acceptance / QA environment for MortgageApplication
+    system: esysmvs1.wsclab.washington.ibm.com
+
+    pattern:
+      maploads:
+        pds:
+          name: DRICE.ACC.CICSLOAD
+          spec:
+            type: LIBRARY
+      loadmods:
+        pds:
+          name: DRICE.ACC.LOADLIB
+          spec:
+            type: LIBRARY
+
+    datasets:
+      cicsload: DRICE.ACC.CICSLOAD
+      loadlib:  DRICE.ACC.LOADLIB
+      copylib:  DRICE.ACC.COPYLIB
+
+    cics:
+      applid:    CICSAC
+      cicsplex:  CPSXA
+      cmci_host: esysmvs1.wsclab.washington.ibm.com
+      cmci_port: 1490
+      cmci_secure: false

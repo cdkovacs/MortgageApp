@@ -1,0 +1,36 @@
+# Wazi Deploy - Production Environment
+# MortgageApplication
+#
+# Production environment — deploy only after acceptance sign-off.
+# Pass to wazideploy-deploy with:  -ef environments/zos.dev.production.yml
+
+---
+environments:
+
+  - name: zos.dev.production
+    description: Production environment for MortgageApplication
+    system: esysmvs1.wsclab.washington.ibm.com
+
+    pattern:
+      maploads:
+        pds:
+          name: DRICE.PRD.CICSLOAD
+          spec:
+            type: LIBRARY
+      loadmods:
+        pds:
+          name: DRICE.PRD.LOADLIB
+          spec:
+            type: LIBRARY
+
+    datasets:
+      cicsload: DRICE.PRD.CICSLOAD
+      loadlib:  DRICE.PRD.LOADLIB
+      copylib:  DRICE.PRD.COPYLIB
+
+    cics:
+      applid:    CICSPD
+      cicsplex:  CPSXA
+      cmci_host: esysmvs1.wsclab.washington.ibm.com
+      cmci_port: 1490
+      cmci_secure: true

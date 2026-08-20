@@ -1,0 +1,227 @@
+name: Deploy
+
+permissions:
+  contents:     read
+  deployments:  write
+
+# ── Trigger ────────────────────────────────────────────────────────────────────
+# Manual dispatch only. Specify a target environment and an optional release
+# version (e.g. v1.2.3). If no version is given the latest GitHub release is
+# used. The release tar is uploaded to the z/OS host before wazideploy runs.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - integration
+          - acceptance
+          - production
+      version:
+        description: "Release version to deploy (e.g. v1.2.3). Leave blank for latest."
+        required: false
+        default: ""
+
+# Only one deploy per environment at a time
+concurrency:
+  group: wazideploy-${{ github.event.inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment }}
+    runs-on: z-demo
+
+    # Map the friendly dropdown value to the wazideploy environment name and
+    # the corresponding GitHub environment (for approval gates / secrets).
+    environment:
+      name: ${{ github.event.inputs.environment }}
+
+    env:
+      ZHOST:     ${{ vars.ZHOST }}
+      ZSSH_PORT: ${{ vars.ZSSH_PORT }}
+      ZUSER:     ${{ vars.ZUSER }}
+
+    steps:
+      # ── 1. Checkout (needed to call scripts/) ─────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2a. Create GitHub deployment record ──────────────────────────────────
+      - name: Create GitHub deployment
+        id: deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_VERSION: ${{ github.event.inputs.version || 'latest' }}
+        run: |
+          set -euo pipefail
+          # required_contexts must be a real JSON array; gh's -f/-F flags can only
+          # send it as a string, so build the body as JSON and use --input.
+          DEPLOYMENT_ID=$(gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            /repos/${{ github.repository }}/deployments \
+            --input - --jq '.id' <<EOF
+          {
+            "ref": "${{ github.sha }}",
+            "environment": "${{ github.event.inputs.environment }}",
+            "description": "Deploy ${DEPLOY_VERSION} to ${{ github.event.inputs.environment }}",
+            "auto_merge": false,
+            "required_contexts": []
+          }
+          EOF
+          )
+          echo "deployment_id=${DEPLOYMENT_ID}" >> "$GITHUB_OUTPUT"
+          echo "Created deployment ${DEPLOYMENT_ID} for environment ${{ github.event.inputs.environment }}"
+
+      # ── 2. Install SSH key ────────────────────────────────────────────────────
+      - name: Set up SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.ZOSS_SSH_PRIVATE_KEY }}
+
+      # ── 3. Resolve version + validate format ──────────────────────────────────
+      - name: Resolve and validate release version
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${INPUT_VERSION}" ]]; then
+            echo "No version specified — fetching latest release."
+            TAG=$(gh release view --repo "${{ github.repository }}" \
+                    --json tagName --jq '.tagName')
+            if [[ -z "${TAG}" ]]; then
+              echo "ERROR: no releases found in this repository." >&2
+              exit 1
+            fi
+            echo "Resolved latest release: ${TAG}"
+          else
+            TAG="${INPUT_VERSION}"
+            # Validate: must match vMAJOR.MINOR.PATCH (with optional pre-release suffix)
+            if ! [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][a-zA-Z0-9._-]+)?$ ]]; then
+              echo "ERROR: '${TAG}' is not a valid release version." >&2
+              echo "Expected format: v<MAJOR>.<MINOR>.<PATCH>  (e.g. v1.2.3)" >&2
+              exit 1
+            fi
+            # Confirm the release actually exists
+            if ! gh release view "${TAG}" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+              echo "ERROR: release '${TAG}' does not exist in this repository." >&2
+              exit 1
+            fi
+            echo "Using specified release: ${TAG}"
+          fi
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      # ── 4. Download release tar ───────────────────────────────────────────────
+      - name: Download release tar
+        id: tar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG:      ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p ./package
+
+          # Download all assets for the release; find the MortgageApplication tar
+          gh release download "${TAG}" \
+            --repo "${{ github.repository }}" \
+            --dir ./package
+
+          TAR_FILE=$(ls ./package/MortgageApplication-zBuilder-*.tar 2>/dev/null | head -1)
+          if [[ -z "${TAR_FILE}" ]]; then
+            echo "ERROR: no MortgageApplication-zBuilder-*.tar asset found in release ${TAG}." >&2
+            exit 1
+          fi
+
+          echo "tar_file=${TAR_FILE}" >> "$GITHUB_OUTPUT"
+          echo "tar_name=$(basename "${TAR_FILE}")" >> "$GITHUB_OUTPUT"
+          echo "Downloaded: ${TAR_FILE}"
+
+      # ── 5. Upload tar to z/OS ─────────────────────────────────────────────────
+      - name: Upload package to z/OS
+        env:
+          TAR_FILE: ${{ steps.tar.outputs.tar_file }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/send-package.sh
+          scripts/send-package.sh "${TAR_FILE}" 2>&1 | tee send-package-output.log
+
+      # ── 6. Map environment dropdown → wazideploy environment name ─────────────
+      - name: Map environment name
+        id: env_map
+        run: |
+          case "${{ github.event.inputs.environment }}" in
+            integration)  echo "wazideploy_env=zos.dev.integration" >> "$GITHUB_OUTPUT" ;;
+            acceptance)   echo "wazideploy_env=zos.dev.acceptance"  >> "$GITHUB_OUTPUT" ;;
+            production)   echo "wazideploy_env=zos.dev.production"  >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      # ── 7. Run Wazi Deploy ────────────────────────────────────────────────────
+      - name: Run wazideploy.sh
+        env:
+          TAR_NAME:       ${{ steps.tar.outputs.tar_name }}
+          WAZIDEPLOY_ENV: ${{ steps.env_map.outputs.wazideploy_env }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/wazideploy.sh
+          scripts/wazideploy.sh \
+            "${TAR_NAME}" \
+            --env "${WAZIDEPLOY_ENV}.yml" \
+            2>&1 | tee wazideploy-output.log
+
+      # ── 7b. Update GitHub deployment status ──────────────────────────────────
+      - name: Update deployment status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ job.status }}" == "success" ]]; then
+            STATE="success"
+          else
+            STATE="failure"
+          fi
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            /repos/${{ github.repository }}/deployments/${{ steps.deployment.outputs.deployment_id }}/statuses \
+            -f state="${STATE}" \
+            -f environment="${{ github.event.inputs.environment }}" \
+            -f description="Deploy ${{ steps.release.outputs.tag }} ${STATE}"
+
+      # ── 8. Upload evidence ────────────────────────────────────────────────────
+      - name: Upload deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wazideploy-evidence-${{ github.event.inputs.environment }}-${{ steps.release.outputs.tag }}
+          path: |
+            send-package-output.log
+            wazideploy-output.log
+          retention-days: 90
+
+      # ── 9. Job summary ────────────────────────────────────────────────────────
+      - name: Post deployment summary
+        if: always()
+        run: |
+          echo "## Deploy Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field       | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Environment | \`${{ github.event.inputs.environment }}\` → \`${{ steps.env_map.outputs.wazideploy_env }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Version     | \`${{ steps.release.outputs.tag }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Package     | \`${{ steps.tar.outputs.tar_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Host        | \`${{ vars.ZHOST }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| User        | \`${{ vars.ZUSER }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Status      | ${{ job.status }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### wazideploy output" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat wazideploy-output.log 2>/dev/null || echo '(no output)'
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

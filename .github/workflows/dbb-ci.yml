@@ -1,0 +1,283 @@
+name: DBB CI
+
+permissions:
+  contents: write
+  pull-requests: write
+  packages: write
+
+# ── Triggers ─────────────────────────────────────────────────────────────────
+# • Pull request (opened / synchronised / reopened) → git-pull + dbb-build
+# • Push to main (i.e. PR merged)                   → dbb-build only
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+# Prevent concurrent builds targeting the same branch/ref
+concurrency:
+  group: dbb-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Job 1: PR build (git-pull → dbb-build) ─────────────────────────────────
+  pr-build:
+    name: PR Build (git-pull + dbb-build)
+    if: github.event_name == 'pull_request'
+    runs-on: z-demo
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: |
+            ${{ secrets.ZOSS_SSH_PRIVATE_KEY }}
+            ${{ secrets.GH_DEPLOY_KEY }}
+
+      - name: git-pull on z/OS
+        env:
+          ZHOST:        ${{ vars.ZHOST }}
+          ZSSH_PORT:    ${{ vars.ZSSH_PORT }}
+          ZUSER:        ${{ vars.ZUSER }}
+          ZREPO_DIR:    ${{ vars.ZREPO_DIR }}
+          ZREPO_URL:    ${{ vars.ZREPO_URL }}
+          ZREPO_BRANCH: ${{ github.head_ref }}
+        run: |
+          set -o pipefail
+          ssh -p "${ZSSH_PORT}" -o StrictHostKeyChecking=no -o BatchMode=yes \
+            "${ZUSER}@${ZHOST}" \
+            ". \$HOME/.profile
+             export PATH=/shared/IBM/foz/v1r1/bin:\$PATH
+             unset _BPXK_AUTOCVT _CEE_RUNOPTS
+             rm -rf '${ZREPO_DIR}'
+             mkdir -p \"\$(dirname '${ZREPO_DIR}')\"
+             git clone --branch '${ZREPO_BRANCH}' '${ZREPO_URL}' '${ZREPO_DIR}'" \
+            2>&1 | tee git-pull-output.log
+
+      - name: dbb-build on z/OS
+        env:
+          ZHOST:      ${{ vars.ZHOST }}
+          ZSSH_PORT:  ${{ vars.ZSSH_PORT }}
+          ZUSER:      ${{ vars.ZUSER }}
+          ZREPO_DIR:  ${{ vars.ZREPO_DIR }}
+        run: |
+          set -o pipefail
+          chmod +x scripts/dbb-build.sh
+          scripts/dbb-build.sh 2>&1 | tee dbb-build-output.log
+
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbb-build-evidence-pr${{ github.event.pull_request.number }}
+          path: |
+            git-pull-output.log
+            dbb-build-output.log
+          retention-days: 90
+
+      - name: Post build summary to job
+        if: always()
+        run: |
+          echo "## DBB PR Build Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field   | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| PR      | #${{ github.event.pull_request.number }} \`${{ github.head_ref }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Host    | \`${{ vars.ZHOST }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| User    | \`${{ vars.ZUSER }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build   | pipeline (impact) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### git-pull output" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat git-pull-output.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### dbb-build output" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat dbb-build-output.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post build logs as PR comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          STATUS="${{ job.status }}"
+          ICON=$( [ "$STATUS" = "success" ] && echo "✅" || echo "❌" )
+
+          BODY="${ICON} **DBB CI — PR Build \`${STATUS}\`**
+
+          | Field | Value |
+          |-------|-------|
+          | PR | #${PR_NUMBER} \`${{ github.head_ref }}\` |
+          | Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+          | Host | \`${{ vars.ZHOST }}\` |
+          | User | \`${{ vars.ZUSER }}\` |
+
+          <details><summary>git-pull output</summary>
+
+          \`\`\`
+          $(cat git-pull-output.log 2>/dev/null || echo '(no output)')
+          \`\`\`
+          </details>
+
+          <details><summary>dbb-build output</summary>
+
+          \`\`\`
+          $(cat dbb-build-output.log 2>/dev/null || echo '(no output)')
+          \`\`\`
+          </details>"
+
+          gh pr comment "${PR_NUMBER}" \
+            --repo "${{ github.repository }}" \
+            --body "${BODY}"
+
+  # ── Job 2: Merge build → release ───────────────────────────────────────────
+  merge-build:
+    name: Merge Build + Release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: z-demo
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history required by semantic-version
+
+      - uses: jfrog/setup-jfrog-cli@v4
+        env:
+          # JFrog platform url (for example: https://acme.jfrog.io)
+          JF_URL: ${{ vars.JF_URL }}
+          # JFrog Platform access token
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+
+      - name: Set up SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: |
+            ${{ secrets.ZOSS_SSH_PRIVATE_KEY }}
+            ${{ secrets.GH_DEPLOY_KEY }}
+
+      - name: git-pull on z/OS
+        env:
+          ZHOST:        ${{ vars.ZHOST }}
+          ZSSH_PORT:    ${{ vars.ZSSH_PORT }}
+          ZUSER:        ${{ vars.ZUSER }}
+          ZREPO_DIR:    ${{ vars.ZREPO_DIR }}
+          ZREPO_URL:    ${{ vars.ZREPO_URL }}
+          ZREPO_BRANCH: main
+        run: |
+          set -o pipefail
+          ssh -p "${ZSSH_PORT}" -o StrictHostKeyChecking=no -o BatchMode=yes \
+            "${ZUSER}@${ZHOST}" \
+            ". \$HOME/.profile
+             export PATH=/shared/IBM/foz/v1r1/bin:\$PATH
+             unset _BPXK_AUTOCVT _CEE_RUNOPTS
+             rm -rf '${ZREPO_DIR}'
+             mkdir -p \"\$(dirname '${ZREPO_DIR}')\"
+             git clone --branch '${ZREPO_BRANCH}' '${ZREPO_URL}' '${ZREPO_DIR}'" \
+            2>&1 | tee git-pull-output.log
+
+      - name: Compute semantic version
+        id: semver
+        uses: paulhatch/semantic-version@v5.4.0
+        with:
+          tag_prefix: "v"
+          major_pattern: "(MAJOR)"
+          minor_pattern: "(MINOR)"
+          version_format: "${major}.${minor}.${patch}"
+          bump_each_commit: false
+
+      - name: dbb-build on z/OS (full build)
+        env:
+          ZHOST:      ${{ vars.ZHOST }}
+          ZSSH_PORT:  ${{ vars.ZSSH_PORT }}
+          ZUSER:      ${{ vars.ZUSER }}
+          ZREPO_DIR:  ${{ vars.ZREPO_DIR }}
+          RELEASE_ID: ${{ steps.semver.outputs.version }}
+        run: |
+          set -o pipefail
+          chmod +x scripts/dbb-build.sh
+          scripts/dbb-build.sh --full 2>&1 | tee dbb-build-output.log
+
+      - name: Download build package from z/OS
+        id: package
+        env:
+          ZHOST:      ${{ vars.ZHOST }}
+          ZSSH_PORT:  ${{ vars.ZSSH_PORT }}
+          ZUSER:      ${{ vars.ZUSER }}
+          ZREPO_DIR:  ${{ vars.ZREPO_DIR }}
+          ZLOCAL_DIR: ./package
+        run: |
+          chmod +x scripts/get-package.sh
+          scripts/get-package.sh 2>&1 | tee get-package-output.log
+          TAR_FILE=$(ls ./package/MortgageApplication-zBuilder-*.tar 2>/dev/null | head -1)
+          if [[ -z "${TAR_FILE}" ]]; then
+            echo "ERROR: no package tar found after get-package.sh" >&2
+            exit 1
+          fi
+          echo "tar_file=${TAR_FILE}" >> "$GITHUB_OUTPUT"
+          echo "tar_name=$(basename ${TAR_FILE})" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to Artifactory
+        env:
+          TAR_FILE: ${{ steps.package.outputs.tar_file }}
+        run: |
+          jf rt upload $TAR_FILE generic-integration/MortgageApp-zbuilder/
+
+      - name: Create GitHub Release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG:      v${{ steps.semver.outputs.version }}
+          TAR_FILE: ${{ steps.package.outputs.tar_file }}
+          TAR_NAME: ${{ steps.package.outputs.tar_name }}
+        run: |
+          gh release create "${TAG}" \
+            --repo "${{ github.repository }}" \
+            --title "MortgageApplication ${TAG}" \
+            --notes "Full DBB build from commit \`${{ github.sha }}\`." \
+            --latest \
+            "${TAR_FILE}#${TAR_NAME}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbb-build-evidence-merge-${{ github.sha }}
+          path: |
+            git-pull-output.log
+            dbb-build-output.log
+            get-package-output.log
+          retention-days: 90
+
+      - name: Post build summary to job
+        if: always()
+        run: |
+          echo "## DBB Merge Build Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field   | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit  | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Host    | \`${{ vars.ZHOST }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| User    | \`${{ vars.ZUSER }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build   | full |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Version | \`${{ steps.semver.outputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### git-pull output" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat git-pull-output.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### dbb-build output" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat dbb-build-output.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

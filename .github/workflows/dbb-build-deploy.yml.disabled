@@ -1,0 +1,409 @@
+# =============================================================================
+# MortgageApplication — zBuilder Build & Wazi Deploy Pipeline
+#
+# Triggered on:
+#   • push to main / release/* branches (full build + deploy)
+#   • pull_request targeting main (build only — no deploy)
+#   • workflow_dispatch (manual, with input overrides)
+#
+# Build tool: IBM zBuilder  ($DBB_HOME/bin/dbb  lifecycle: build)
+# Mirrors the dbb-user-build profile defined in zapp.yaml.
+#
+# Required GitHub Secrets (Settings → Secrets and variables → Actions):
+#   ESYS_SSH_PRIVATE_KEY   — private key whose public half is in
+#                            ~/.ssh/authorized_keys on the z/OS host
+#   ESYS_SSH_USER          — TSO user ID (e.g. IBMUSER)
+#
+# Optional GitHub Secrets (override defaults):
+#   ESYS_DBB_HLQ           — output HLQ for build artefacts (default: MORTAPP)
+#   ESYS_DBB_WORKSPACE     — USS root of the DBB workspace
+#                            (default: /u/${user}/dbb-workspace)
+#   ESYS_DBB_CONFIG_DIR    — USS path to the zBuilder/DBB build configuration
+#                            directory (default: /u/drice/dbb/build)
+#   ESYS_WAZIDEPLOY_ENV    — Wazi Deploy environment name (default: integration)
+#   ESYS_WAZIDEPLOY_CONF   — path to wazideploy-generate config on USS
+#
+# Host constants (edit here if the target system changes):
+#   SSH_HOST  : esysmvs1.wsclab.washington.ibm.com
+#   SSH_PORT  : 22
+# =============================================================================
+
+name: DBB Build & Wazi Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - "release/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      hlq:
+        description: "Output HLQ (overrides secret ESYS_DBB_HLQ)"
+        required: false
+        default: ""
+      deploy:
+        description: "Run Wazi Deploy after build?"
+        type: boolean
+        required: false
+        default: false
+      full_build:
+        description: "Force full (non-incremental) DBB build?"
+        type: boolean
+        required: false
+        default: false
+
+# -----------------------------------------------------------------
+# Concurrency: only one pipeline per ref at a time.
+# A new push to the same branch will cancel the in-flight run.
+# -----------------------------------------------------------------
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SSH_HOST: esysmvs1.wsclab.washington.ibm.com
+  SSH_PORT: "22"
+  # Defaults — overridden by secrets when present
+  SSH_USER:       ${{ secrets.ESYS_SSH_USER }}
+  DBB_HLQ:        ${{ secrets.ESYS_DBB_HLQ         || 'MORTAPP' }}
+  DBB_WORKSPACE:  ${{ secrets.ESYS_DBB_WORKSPACE   || '' }}
+  DBB_CONFIG_DIR: ${{ secrets.ESYS_DBB_CONFIG_DIR  || '/u/drice/dbb/build' }}
+  DEPLOY_ENV:     ${{ secrets.ESYS_WAZIDEPLOY_ENV  || 'integration' }}
+
+jobs:
+  # ===========================================================================
+  # JOB 1 — zBuilder Build (runs on the z-demo self-hosted runner)
+  # ===========================================================================
+  build:
+    name: zBuilder Build on z/OS
+    runs-on: z-demo
+
+    outputs:
+      build_output_dir: ${{ steps.build.outputs.build_output_dir }}
+      package_name:     ${{ steps.build.outputs.package_name }}
+      changed_files:    ${{ steps.changed.outputs.changed_files }}
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout the application source
+      # -----------------------------------------------------------------------
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history needed for incremental DBB builds
+
+      # -----------------------------------------------------------------------
+      # 2. Determine changed files (incremental build input)
+      # -----------------------------------------------------------------------
+      - name: Identify changed source files
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+          fi
+
+          # Fall back to full build if there is no prior commit (first push)
+          if git cat-file -e "${BASE_SHA}" 2>/dev/null; then
+            CHANGED=$(git diff --name-only "${BASE_SHA}" HEAD -- \
+              'src/cobol/*.cbl' 'src/bms/*.bms' 'src/copybook/*.cpy' \
+              'src/link/*.lnk' 'src/zunit/*.cbl' 'src/zunit/*.bzucfg' \
+              | tr '\n' ',')
+          else
+            CHANGED="FULL_BUILD"
+          fi
+
+          echo "changed_files=${CHANGED}" >> "$GITHUB_OUTPUT"
+          echo "Changed: ${CHANGED}"
+
+      # -----------------------------------------------------------------------
+      # 3. Install SSH key and add host fingerprint
+      # -----------------------------------------------------------------------
+      - name: Install SSH private key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.ZOSS_SSH_PRIVATE_KEY }}
+
+      - name: Trust z/OS host fingerprint
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan -p "${{ env.SSH_PORT }}" "${{ env.SSH_HOST }}" \
+            >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 600 ~/.ssh/known_hosts
+
+      # -----------------------------------------------------------------------
+      # 4. Resolve runtime variables
+      # -----------------------------------------------------------------------
+      - name: Resolve runtime variables
+        id: vars
+        env:
+          INPUT_HLQ: ${{ github.event.inputs.hlq }}
+          INPUT_FULL: ${{ github.event.inputs.full_build }}
+          ESYS_USER: ${{ env.SSH_USER }}
+        run: |
+          # HLQ: manual dispatch input wins, then secret, then default
+          HLQ="${INPUT_HLQ:-${DBB_HLQ}}"
+          echo "hlq=${HLQ}" >> "$GITHUB_OUTPUT"
+
+          # USS workspace root
+          WS="${DBB_WORKSPACE:-/u/${ESYS_USER}/dbb-workspace}"
+          echo "workspace=${WS}" >> "$GITHUB_OUTPUT"
+
+          # Remote application directory (mirrored from Git)
+          APP_DIR="${WS}/MortgageApplication"
+          echo "app_dir=${APP_DIR}" >> "$GITHUB_OUTPUT"
+
+          # Build output directory on USS
+          BUILD_OUT="${WS}/build-output/${GITHUB_RUN_NUMBER}"
+          echo "build_output_dir=${BUILD_OUT}" >> "$GITHUB_OUTPUT"
+
+          # DBB build configuration directory on USS
+          echo "config_dir=${DBB_CONFIG_DIR}" >> "$GITHUB_OUTPUT"
+
+          # Full-build flag
+          FORCE_FULL="${INPUT_FULL:-false}"
+          if [ "${{ steps.changed.outputs.changed_files }}" = "FULL_BUILD" ]; then
+            FORCE_FULL="true"
+          fi
+          echo "force_full=${FORCE_FULL}" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # 5. Upload source to USS
+      # -----------------------------------------------------------------------
+      - name: Upload source to USS
+        env:
+          ESYS_USER: ${{ env.SSH_USER }}
+          APP_DIR:   ${{ steps.vars.outputs.app_dir }}
+        run: |
+          SSH_OPTS="-o StrictHostKeyChecking=yes \
+                    -o BatchMode=yes \
+                    -p ${{ env.SSH_PORT }}"
+
+          # Ensure the remote application directory exists
+          ssh $SSH_OPTS "${{ env.ESYS_USER }}@${{ env.SSH_HOST }}" \
+            "mkdir -p '${APP_DIR}'"
+
+          # Sync source tree to USS (rsync over SSH, text conversion handled
+          # by iconv on z/OS — DBB zAppBuild reads UTF-8 encoded sources)
+          rsync -az --delete \
+            -e "ssh $SSH_OPTS" \
+            src/ \
+            "${{ env.ESYS_USER }}@${{ env.SSH_HOST }}:${APP_DIR}/src/"
+
+      # -----------------------------------------------------------------------
+      # 6. Run zBuilder build lifecycle over SSH
+      #    Mirrors the dbb-user-build profile in zapp.yaml:
+      #      command:   $DBB_HOME/bin/dbb
+      #      lifecycle: build
+      #      args:      --workspace --application --hlq --outDir
+      #                 --configDir /u/drice/dbb/build [--userBuild]
+      # -----------------------------------------------------------------------
+      - name: Run zBuilder build
+        id: build
+        env:
+          ESYS_USER:  ${{ env.SSH_USER }}
+          APP_DIR:    ${{ steps.vars.outputs.app_dir }}
+          HLQ:        ${{ steps.vars.outputs.hlq }}
+          BUILD_OUT:  ${{ steps.vars.outputs.build_output_dir }}
+          CONFIG_DIR: ${{ steps.vars.outputs.config_dir }}
+          FORCE_FULL: ${{ steps.vars.outputs.force_full }}
+          WORKSPACE:  ${{ steps.vars.outputs.workspace }}
+        run: |
+          SSH_OPTS="-o StrictHostKeyChecking=yes -o BatchMode=yes \
+                    -p ${{ env.SSH_PORT }}"
+
+          # --userBuild is omitted for pipeline (full-application) builds.
+          # Pass it only when FORCE_FULL requests a complete rebuild, using
+          # the zBuilder lifecycle flag rather than the zAppBuild --fullBuild.
+          USER_BUILD_FLAG=""
+          if [ "${FORCE_FULL}" = "true" ]; then
+            USER_BUILD_FLAG="--userBuild"
+          fi
+
+          # Execute zBuilder on z/OS USS
+          ssh $SSH_OPTS "${{ env.ESYS_USER }}@${{ env.SSH_HOST }}" << REMOTE
+            set -e
+            mkdir -p "${BUILD_OUT}"
+
+            # DBB_HOME must be set in the user's .profile on z/OS;
+            # source it here in case the non-interactive shell skips it.
+            [ -f ~/.profile ] && . ~/.profile
+
+            \$DBB_HOME/bin/dbb build \
+              --workspace "${WORKSPACE}" \
+              --application MortgageApplication \
+              --hlq        "${HLQ}" \
+              --outDir     "${BUILD_OUT}" \
+              --configDir  "${CONFIG_DIR}" \
+              ${USER_BUILD_FLAG}
+          REMOTE
+
+          echo "build_output_dir=${BUILD_OUT}" >> "$GITHUB_OUTPUT"
+
+          # Derive package name from run number for Wazi Deploy
+          PACKAGE="MortgageApplication-${GITHUB_RUN_NUMBER}.tar"
+          echo "package_name=${PACKAGE}" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # 7. Download build logs & report
+      # -----------------------------------------------------------------------
+      - name: Download build artefacts
+        if: always()
+        env:
+          ESYS_USER: ${{ env.SSH_USER }}
+          BUILD_OUT: ${{ steps.vars.outputs.build_output_dir }}
+        run: |
+          mkdir -p build-logs
+          scp -r \
+            -o StrictHostKeyChecking=yes \
+            -P "${{ env.SSH_PORT }}" \
+            "${{ env.ESYS_USER }}@${{ env.SSH_HOST }}:${BUILD_OUT}/*" \
+            build-logs/ || true
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ github.run_number }}
+          path: build-logs/
+          retention-days: 30
+
+  # ===========================================================================
+  # JOB 2 — Package (create Wazi Deploy input package on USS)
+  # ===========================================================================
+  package:
+    name: Create Wazi Deploy Package
+    runs-on: z-demo
+    needs: build
+    # Only package on push/dispatch (not PRs); skip if build failed
+    if: >
+      success() &&
+      github.event_name != 'pull_request'
+
+    outputs:
+      package_uss_path: ${{ steps.pkg.outputs.package_uss_path }}
+
+    steps:
+      - name: Install SSH private key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.ZOSS_SSH_PRIVATE_KEY }}
+
+      - name: Trust z/OS host fingerprint
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          ssh-keyscan -p "${{ env.SSH_PORT }}" "${{ env.SSH_HOST }}" \
+            >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Generate Wazi Deploy package
+        id: pkg
+        env:
+          ESYS_USER:    ${{ env.SSH_USER }}
+          BUILD_OUT:    ${{ needs.build.outputs.build_output_dir }}
+          PACKAGE_NAME: ${{ needs.build.outputs.package_name }}
+          WAZIDEPLOY_CONF: ${{ secrets.ESYS_WAZIDEPLOY_CONF }}
+        run: |
+          SSH_OPTS="-o StrictHostKeyChecking=yes -o BatchMode=yes \
+                    -p ${{ env.SSH_PORT }}"
+
+          PKG_DIR="${BUILD_OUT}/packages"
+
+          ssh $SSH_OPTS "${{ env.ESYS_USER }}@${{ env.SSH_HOST }}" << REMOTE
+            set -e
+            [ -f ~/.profile ] && . ~/.profile
+            mkdir -p "${PKG_DIR}"
+
+            # wazideploy-package creates a TAR from the DBB BuildReport.json
+            wazideploy-package \
+              --buildReportFile  "${BUILD_OUT}/BuildReport.json" \
+              --tarFileName      "${PKG_DIR}/${PACKAGE_NAME}" \
+              $( [ -n "${WAZIDEPLOY_CONF}" ] \
+                 && echo "--configFile ${WAZIDEPLOY_CONF}" )
+          REMOTE
+
+          PKG_PATH="${PKG_DIR}/${PACKAGE_NAME}"
+          echo "package_uss_path=${PKG_PATH}" >> "$GITHUB_OUTPUT"
+          echo "Package created at: ${PKG_PATH}"
+
+  # ===========================================================================
+  # JOB 3 — Deploy (Wazi Deploy to integration environment)
+  # ===========================================================================
+  deploy:
+    name: Wazi Deploy to ${{ vars.DEPLOY_ENV || 'integration' }}
+    runs-on: z-demo
+    needs: [build, package]
+    # Deploy on: push/dispatch to main or release/*, OR manual dispatch with
+    # deploy=true. Never deploy from PRs.
+    if: >
+      success() &&
+      github.event_name != 'pull_request' &&
+      (
+        github.ref == 'refs/heads/main' ||
+        startsWith(github.ref, 'refs/heads/release/') ||
+        github.event.inputs.deploy == 'true'
+      )
+
+    environment:
+      name: ${{ vars.DEPLOY_ENV || 'integration' }}
+
+    steps:
+      - name: Install SSH private key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.ZOSS_SSH_PRIVATE_KEY }}
+
+      - name: Trust z/OS host fingerprint
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          ssh-keyscan -p "${{ env.SSH_PORT }}" "${{ env.SSH_HOST }}" \
+            >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Run Wazi Deploy
+        env:
+          ESYS_USER:       ${{ env.SSH_USER }}
+          PKG_USS_PATH:    ${{ needs.package.outputs.package_uss_path }}
+          DEPLOY_ENV:      ${{ env.DEPLOY_ENV }}
+          WAZIDEPLOY_CONF: ${{ secrets.ESYS_WAZIDEPLOY_CONF }}
+        run: |
+          SSH_OPTS="-o StrictHostKeyChecking=yes -o BatchMode=yes \
+                    -p ${{ env.SSH_PORT }}"
+
+          ssh $SSH_OPTS "${{ env.ESYS_USER }}@${{ env.SSH_HOST }}" << REMOTE
+            set -e
+            [ -f ~/.profile ] && . ~/.profile
+
+            wazideploy-deploy \
+              --packageFile   "${PKG_USS_PATH}" \
+              --environment   "${DEPLOY_ENV}" \
+              $( [ -n "${WAZIDEPLOY_CONF}" ] \
+                 && echo "--configFile ${WAZIDEPLOY_CONF}" )
+          REMOTE
+
+      - name: Download deploy evidence
+        if: always()
+        env:
+          ESYS_USER:    ${{ env.SSH_USER }}
+          PKG_USS_PATH: ${{ needs.package.outputs.package_uss_path }}
+        run: |
+          EVIDENCE_DIR="$(dirname "${PKG_USS_PATH}")/evidence"
+          mkdir -p deploy-evidence
+          scp -r \
+            -o StrictHostKeyChecking=yes \
+            -P "${{ env.SSH_PORT }}" \
+            "${{ env.ESYS_USER }}@${{ env.SSH_HOST }}:${EVIDENCE_DIR}/" \
+            deploy-evidence/ || true
+
+      - name: Upload deploy evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-evidence-${{ github.run_number }}
+          path: deploy-evidence/
+          retention-days: 90

@@ -1,0 +1,19 @@
+{
+  "rules": {
+    "default": "warning",
+    "NOGOBACK": "warning",
+    "NOSECTION": "warning",
+    "PERFORMTHRU": "warning",
+    "NOCONTINUE": "warning",
+    "ALTINDEXES": "warning",
+    "NOALTINDEXES": "warning",
+    "MOVETOGROUP": "warning",
+    "NOINLINE": "warning",
+    "NODATADIV": "warning",
+    "NOPROCEDDIV": "warning",
+    "NODATALENGTH": "warning",
+    "NOEVALUATE": "warning",
+    "NOEXITVIAGOBACK": "off",
+    "INFORMATIONAL": "off"
+  }
+}

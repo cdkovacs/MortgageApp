@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "zopeneditor": {
+      "url": "http://localhost:63017/mcp",
+      "disabled": false,
+      "alwaysAllow": [
+        "userbuild-run-user-build"
+      ]
+    },
+    "jcl-expert": {
+      "command": "node",
+      "args": [
+        "/Users/davidrice/git/MortgageApp-zBuilder/.bob/mcp-servers/jcl-expert/build/index.js"
+      ],
+      "env": {
+        "WORKSPACE_ROOT": "/Users/davidrice/git/MortgageApp-zBuilder",
+        "JCLX_SSH_USER": "drice"
+      },
+      "timeout": 120000
+    }
+  }
+}

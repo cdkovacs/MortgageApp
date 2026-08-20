@@ -1,0 +1,111 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.6.1 Chrome/142.0.7444.265 Electron/39.8.0 Safari/537.36" version="29.6.1">
+  <diagram name="Page-1" id="1L1AYd2MimV6DhTO_vox">
+    <mxGraphModel dx="1106" dy="930" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-18" parent="1" style="whiteSpace=wrap;html=1;aspect=fixed;" value="" vertex="1">
+          <mxGeometry height="520" width="520" x="30" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-3" edge="1" parent="1" source="JGW84sy8jFPcmJq6_ULJ-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="JGW84sy8jFPcmJq6_ULJ-2" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-10" edge="1" parent="1" source="JGW84sy8jFPcmJq6_ULJ-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;" target="JGW84sy8jFPcmJq6_ULJ-11">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="200" y="250" />
+              <mxPoint x="200" y="150" />
+            </Array>
+            <mxPoint x="200" y="120" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-12" edge="1" parent="1" source="JGW84sy8jFPcmJq6_ULJ-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;" target="JGW84sy8jFPcmJq6_ULJ-13">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="200" y="250" />
+              <mxPoint x="200" y="70" />
+            </Array>
+            <mxPoint x="200" y="60" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="clone repo to z/OS" vertex="1">
+          <mxGeometry height="60" width="120" x="50" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-5" edge="1" parent="1" source="JGW84sy8jFPcmJq6_ULJ-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="JGW84sy8jFPcmJq6_ULJ-4" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="run pipeline build" vertex="1">
+          <mxGeometry height="60" width="120" x="250" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-29" edge="1" parent="1" source="JGW84sy8jFPcmJq6_ULJ-4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="JGW84sy8jFPcmJq6_ULJ-28" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-4" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="scp tar for artifactory" vertex="1">
+          <mxGeometry height="60" width="120" x="450" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-27" edge="1" parent="1" source="JGW84sy8jFPcmJq6_ULJ-6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="JGW84sy8jFPcmJq6_ULJ-8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-6" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="run wazi deploy gen and deploy on the tar file" vertex="1">
+          <mxGeometry height="60" width="120" x="50" y="380" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-8" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="retrieve wazi deploy evidence file" vertex="1">
+          <mxGeometry height="60" width="120" x="250" y="380" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-11" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="run zCodeScan on changed cobol files" vertex="1">
+          <mxGeometry height="60" width="120" x="250" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-13" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="run JCL Expert on any changed JCL files" vertex="1">
+          <mxGeometry height="60" width="120" x="250" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-14" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="zero trust (code signatures)" vertex="1">
+          <mxGeometry height="60" width="120" x="40" y="550" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-15" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="Things I want" vertex="1">
+          <mxGeometry height="30" width="60" x="225" y="500" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-16" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Ansible / other tool for deploying to Test / Prod regions" vertex="1">
+          <mxGeometry height="60" width="120" x="40" y="630" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-19" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="zCodeScan" vertex="1">
+          <mxGeometry height="60" width="120" x="40" y="710" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-20" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="TAZ" vertex="1">
+          <mxGeometry height="60" width="120" x="40" y="790" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-21" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="deployment evidence retrieval" vertex="1">
+          <mxGeometry height="60" width="120" x="220" y="550" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-22" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Approval flow (demonstrable in some way... to satisfy SOD)" vertex="1">
+          <mxGeometry height="60" width="120" x="220" y="630" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-23" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="parallel tasks" vertex="1">
+          <mxGeometry height="60" width="120" x="220" y="710" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-24" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="secrets scanning" vertex="1">
+          <mxGeometry height="60" width="120" x="220" y="790" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-25" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="SBOM creation" vertex="1">
+          <mxGeometry height="60" width="120" x="400" y="550" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-26" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="&lt;font style=&quot;font-size: 10px;&quot;&gt;Bob premium cli integration to analyze pipeline failure states (and maybe create a PR)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="60" width="120" x="400" y="630" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-30" edge="1" parent="1" source="JGW84sy8jFPcmJq6_ULJ-28" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="JGW84sy8jFPcmJq6_ULJ-6">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="710" y="330" />
+              <mxPoint x="110" y="330" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-28" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="scp tar retrieved from artifactory" vertex="1">
+          <mxGeometry height="60" width="120" x="650" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="JGW84sy8jFPcmJq6_ULJ-31" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="retrieve DBB compiler files on failure" vertex="1">
+          <mxGeometry height="60" width="120" x="400" y="710" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,134 @@
+name: Promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Artifact version to promote (e.g. 1.2.3)"
+        required: true
+        type: string
+      target:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - acceptance
+          - production
+
+# Prevent concurrent promotions of the same version
+concurrency:
+  group: promote-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Promote ${{ inputs.version }} → ${{ inputs.target }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ vars.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+
+      # ── Resolve artifact ─────────────────────────────────────────────────────
+      # Artifacts are named  MortgageApplication-zBuilder-<ver>-<datetime>.tar
+      # so we search with a wildcard and select the newest hit by `created`.
+      - name: Resolve artifact path
+        id: resolve
+        env:
+          VERSION: ${{ inputs.version }}
+          TARGET:  ${{ inputs.target }}
+        run: |
+          case "${TARGET}" in
+            acceptance) SRC_REPO="generic-integration" ;;
+            production) SRC_REPO="generic-acceptance"  ;;
+          esac
+
+          PATTERN="${SRC_REPO}/MortgageApp-zbuilder/package/MortgageApplication-zBuilder-${VERSION}-*.tar"
+          echo "Searching: ${PATTERN}"
+          SEARCH_JSON=$(jf rt search "${PATTERN}")
+          echo "${SEARCH_JSON}"
+
+          # Select the newest artifact by the `created` field
+          ARTIFACT_PATH=$(echo "${SEARCH_JSON}" \
+            | python3 -c "
+          import sys, json
+          hits = json.load(sys.stdin)
+          if not hits:
+              sys.exit(1)
+          newest = sorted(hits, key=lambda x: x.get('created',''), reverse=True)[0]
+          print(newest['path'])
+          ")
+
+          if [[ $? -ne 0 || -z "${ARTIFACT_PATH}" ]]; then
+            echo "ERROR: no artifact matching version ${VERSION} found in ${SRC_REPO}." >&2
+            if [[ "${TARGET}" == "production" ]]; then
+              # Check if it's stuck in integration
+              INT_PATTERN="generic-integration/MortgageApp-zbuilder/package/MortgageApplication-zBuilder-${VERSION}-*.tar"
+              INT_HIT=$(jf rt search "${INT_PATTERN}" | python3 -c \
+                "import sys,json; hits=json.load(sys.stdin); print(hits[0]['path'] if hits else '')" 2>/dev/null || true)
+              if [[ -n "${INT_HIT}" ]]; then
+                echo "ERROR: artifact ${VERSION} is in generic-integration but has not been" \
+                     " promoted to generic-acceptance yet. Promote to acceptance first." >&2
+              fi
+            fi
+            exit 1
+          fi
+
+          echo "Resolved artifact: ${ARTIFACT_PATH}"
+          echo "src_repo=${SRC_REPO}"       >> "$GITHUB_OUTPUT"
+          echo "artifact_path=${ARTIFACT_PATH}" >> "$GITHUB_OUTPUT"
+
+      # ── integration → acceptance ─────────────────────────────────────────────
+      - name: Promote integration → acceptance
+        if: inputs.target == 'acceptance'
+        env:
+          ARTIFACT_PATH: ${{ steps.resolve.outputs.artifact_path }}
+        run: |
+          FILENAME=$(basename "${ARTIFACT_PATH}")
+          DST_REPO="generic-acceptance"
+          DST_PATH="${DST_REPO}/MortgageApp-zbuilder/package/${FILENAME}"
+          echo "Downloading ${ARTIFACT_PATH}"
+          jf rt dl "${ARTIFACT_PATH}" ./ --flat
+          echo "Uploading to ${DST_PATH}"
+          jf rt u "${FILENAME}" "${DST_PATH}"
+          echo "Deleting source ${ARTIFACT_PATH}"
+          jf rt del "${ARTIFACT_PATH}"
+          echo "✅ Promoted ${FILENAME} to acceptance"
+
+      # ── acceptance → production ──────────────────────────────────────────────
+      - name: Promote acceptance → production
+        if: inputs.target == 'production'
+        env:
+          ARTIFACT_PATH: ${{ steps.resolve.outputs.artifact_path }}
+        run: |
+          FILENAME=$(basename "${ARTIFACT_PATH}")
+          DST_REPO="generic-production"
+          DST_PATH="${DST_REPO}/MortgageApp-zbuilder/package/${FILENAME}"
+          echo "Downloading ${ARTIFACT_PATH}"
+          jf rt dl "${ARTIFACT_PATH}" ./ --flat
+          echo "Uploading to ${DST_PATH}"
+          jf rt u "${FILENAME}" "${DST_PATH}"
+          echo "Deleting source ${ARTIFACT_PATH}"
+          jf rt del "${ARTIFACT_PATH}"
+          echo "✅ Promoted ${FILENAME} to production"
+
+      - name: Post promotion summary
+        if: success()
+        env:
+          ARTIFACT_PATH: ${{ steps.resolve.outputs.artifact_path }}
+        run: |
+          case "${{ inputs.target }}" in
+            acceptance) FROM="integration" ;;
+            production) FROM="acceptance" ;;
+          esac
+          echo "## Promotion Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field    | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Version  | \`${{ inputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Artifact | \`$(basename ${ARTIFACT_PATH})\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| From     | \`generic-${FROM}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| To       | \`generic-${{ inputs.target }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Run      | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,156 @@
+name: MortgageApplication
+description: >-
+  IBM z/OS CICS mortgage processing application — COBOL, BMS, DB2.
+  Transaction EPSP invokes EPSCMORT which chains through EPSCSMRT,
+  EPSMPMT, and EPSNBRVL. Built with IBM Dependency-Based Build (DBB).
+version: 1.0.0
+author: IBM Z Open Editor
+
+# ---------------------------------------------------------------------------
+# Property Groups
+# Defines include-file search paths for the Z Open Editor language server.
+# Scoped by language so resolution is fast and precise.
+# ---------------------------------------------------------------------------
+propertyGroups:
+
+  # COBOL programs: resolve copybooks from src/copybook/
+  # Also includes the generated BMS DSECTs produced by assembling
+  # epsmort.bms and epsmlis.bms (deployed to the copybook library on z/OS,
+  # but referenced locally via the same path for editor resolution).
+  - name: cobol-local
+    language: cobol
+    libraries:
+      - name: syslib
+        type: local
+        locations:
+          - src/copybook
+
+  # BMS maps: no include dependencies — stand-alone DFHMSD source.
+  # Entry kept for completeness; no syslib needed for BMS locally.
+  - name: bms-local
+    language: hlasm
+    libraries:
+      - name: syslib
+        type: local
+        locations:
+          - src/copybook
+
+# ---------------------------------------------------------------------------
+# Profiles
+# ---------------------------------------------------------------------------
+profiles:
+
+  # -------------------------------------------------------------------------
+  # zBuilder user-build profile (DBB dependency-based build)
+  # Triggered from Z Open Editor "User Build" for a single file.
+  # -------------------------------------------------------------------------
+  - name: dbb-user-build
+    type: dbb
+    settings:
+      command: "$DBB_HOME/bin/dbb build"
+      lifecycle: user
+      lifecycleArgs:
+        - --hlq
+        - ${zopeneditor.userbuild.userSettings.dbbHlq}
+        - --verbose
+      additionalDependencies:
+        - dbb-app.yaml
+        - src/copybook/**/*.cpy
+      # Log files to download from USS after the build completes.
+      logFilePatterns:
+        - '${buildFile.basename}.log'
+        - BuildReport.json
+        - BuildReport.html
+
+  # -------------------------------------------------------------------------
+  # zBuilder release-build profile (DBB dependency-based build)
+  # Compiles all sources, produces a complete BuildReport.json suitable
+  # for wazideploy-package. Uses the 'release' lifecycle defined in
+  # dbb-app.yaml which mirrors the 'full' lifecycle from dbb-build.yaml.
+  # Run manually or from a CI pipeline (not from Z Open Editor user build).
+  # -------------------------------------------------------------------------
+  - name: dbb-release-build
+    type: dbb
+    settings:
+      command: "$DBB_HOME/bin/dbb build"
+      lifecycle: release
+      lifecycleArgs:
+        - --hlq
+        - ${zopeneditor.userbuild.userSettings.dbbHlq}
+        - --verbose
+      additionalDependencies:
+        - dbb-app.yaml
+        - src/copybook/**/*.cpy
+      # Log files to download from USS after the build completes.
+      logFilePatterns:
+        - BuildReport.json
+        - BuildReport.html
+
+  # -------------------------------------------------------------------------
+  # RSE API file transfer mappings
+  # Controls how files are encoded and which MVS data sets they map to
+  # when uploaded/downloaded via the RSE API server.
+  # Update the HLQ (MORTAPP) to match your site's naming convention.
+  # -------------------------------------------------------------------------
+  - name: rseapi-mappings
+    type: rseapi
+    settings:
+      default.encoding: IBM-1047
+      mappings:
+        # COBOL source → COBOL program library
+        - extension: cbl
+          transfer: text
+          encoding: IBM-1047
+          resource: MORTAPP.**.COBOL
+        # COBOL copybooks → copybook library
+        - extension: cpy
+          transfer: text
+          encoding: IBM-1047
+          resource: MORTAPP.**.COPYBOOK
+        # BMS map source → BMS source library
+        - extension: bms
+          transfer: text
+          encoding: IBM-1047
+          resource: MORTAPP.**.BMS
+        # Link-edit control cards → link card library
+        - extension: lnk
+          transfer: text
+          encoding: IBM-1047
+          resource: MORTAPP.**.LINK
+        # CICS Resource Builder YAML definitions
+        - extension: yaml
+          transfer: text
+          encoding: IBM-1047
+          resource: MORTAPP.**.CRB
+        # zUnit test suite programs → COBOL program library (compiled same as mainline)
+        # bzucfg files are uploaded as text for the test runner
+        - extension: bzucfg
+          transfer: text
+          encoding: IBM-1047
+          resource: MORTAPP.**.BZUCFG
+
+  # -------------------------------------------------------------------------
+  # zUnit test profile
+  # Runs the TAZ/zUnit test suites for EPSMPMT and EPSNBRVL via the
+  # z/OS Automated Unit Test framework.
+  # -------------------------------------------------------------------------
+  - name: zunit-test
+    type: test
+    settings:
+      unitTest:
+        # Procedure libraries containing the zUnit runner (BPXAS, etc.)
+        procLib:
+          - MORTAPP.INT.PROCLIB
+          - SYS1.PROCLIB
+        # Data set where unit test cases (bzucfg) are stored on USS
+        configDS: MORTAPP.INT.BZUCFG
+        # Data set where test results are written
+        resultDS: MORTAPP.INT.TESTRESULT
+        # Load library containing the programs under test and test suites
+        userLibraries:
+          - MORTAPP.INT.LOADLIB
+          - MORTAPP.INT.CICSLOAD
+        # Default local folder for test case artifacts
+        defaultTestCaseFolder: src/zunit
+        # Job card for test execution
+        jobcard: '//ZUTST JOB (ACCT),''ZUNIT'',CLASS=A,MSGCLASS=H,NOTIFY=&SYSUID'

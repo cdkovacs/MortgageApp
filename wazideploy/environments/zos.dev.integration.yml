@@ -1,0 +1,36 @@
+# Wazi Deploy - Integration Environment
+# MortgageApplication
+#
+# Developer / CI integration environment.
+# Pass to wazideploy-deploy with:  -ef environments/zos.dev.integration.yml
+
+---
+environments:
+
+  - name: zos.dev.integration
+    description: Integration environment for MortgageApplication CI builds
+    system: esysmvs1.wsclab.washington.ibm.com
+
+    pattern:
+      maploads:
+        pds:
+          name: DRICE.DEV.CICSLOAD
+          spec:
+            type: LIBRARY
+      loadmods:
+        pds:
+          name: DRICE.DEV.LOADLIB
+          spec:
+            type: LIBRARY
+
+    datasets:
+      cicsload: DRICE.DEV.CICSLOAD
+      loadlib:  DRICE.DEV.LOADLIB
+      copylib:  DRICE.DEV.COPYLIB
+
+    cics:
+      applid:    CICSIA
+      cicsplex:  CPSXA
+      cmci_host: esysmvs1.wsclab.washington.ibm.com
+      cmci_port: 1490
+      cmci_secure: false

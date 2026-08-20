@@ -1,0 +1,179 @@
+---
+################################################################
+# LICENSED MATERIALS - PROPERTY OF IBM
+# "RESTRICTED MATERIALS OF IBM"
+# (C) COPYRIGHT IBM CORPORATION 2020, 2025. ALL RIGHTS RESERVED
+# US GOVERNMENT USERS RESTRICTED RIGHTS - USE, DUPLICATION,
+# OR DISCLOSURE RESTRICTED BY GSA ADP SCHEDULE
+# CONTRACT WITH IBM CORPORATION
+################################################################
+#
+# dbb-build.yaml — build framework configuration for MortgageApplication-zBuilder
+#
+# Lifecycles:
+#   pipeline       — impact analysis + package  (PR builds)
+#   pipeline-full  — full analysis   + package  (merge-to-main builds)
+#   full           — full analysis, no package  (local dev / debugging)
+#   impact         — impact analysis, no package
+#   file           — single-file build
+#   user           — IDE user build
+###############################################################
+version: 1.0.0
+
+include:
+  - file: Languages.yaml
+
+lifecycles:
+
+  # ── PR build: impact analysis + package ──────────────────────────────────
+  - lifecycle: pipeline
+    cli:
+      usage: dbb build pipeline [arguments] [options]
+      options:
+        - longOption: "baselineRef"
+          hasArg: true
+          description: "Overrides the baseline reference to measure changes from."
+        - longOption: "release-id"
+          hasArg: true
+          description: "The release identifier for the package being created. ie: 1.0.0"
+        - longOption: "build-id"
+          hasArg: true
+          description: "The build identifier for the package being created. ie: 20240415.7"
+    tasks:
+      - Start
+      - ScannerInit
+      - MetadataInit
+      - ImpactAnalysis
+      - Languages
+      - task: Package
+        condition: ${STATUS} == 2 || ${STATUS} == 0
+        variables:
+          - name: repositoryTarget
+            value: "release/${RELEASE_IDENTIFIER}/"
+      - Finish
+
+  # ── Merge-to-main build: full analysis + package ─────────────────────────
+  - lifecycle: pipelinefull
+    cli:
+      usage: dbb build pipelinefull [arguments] [options]
+      options:
+        - longOption: "release-id"
+          hasArg: true
+          description: "The release identifier for the package being created. ie: 1.0.0"
+        - longOption: "build-id"
+          hasArg: true
+          description: "The build identifier for the package being created. ie: 20240415.7"
+    tasks:
+      - Start
+      - ScannerInit
+      - MetadataInit
+      - FullAnalysis
+      - Languages
+      - task: Package
+        condition: ${STATUS} == 2 || ${STATUS} == 0
+        variables:
+          - name: repositoryTarget
+            value: "release/${RELEASE_IDENTIFIER}/"
+      - Finish
+
+  # ── Full build (no package — local dev / debugging) ───────────────────────
+  - lifecycle: full
+    tasks:
+      - Start
+      - ScannerInit
+      - MetadataInit
+      - FullAnalysis
+      - Languages
+      - Finish
+
+  # ── Impact build (no package — local dev) ─────────────────────────────────
+  - lifecycle: impact
+    cli:
+      usage: dbb build impact [arguments] [options]
+      options:
+        - longOption: "baselineRef"
+          hasArg: true
+          description: "Overrides the baseline reference to measure changes from."
+    tasks:
+      - Start
+      - ScannerInit
+      - MetadataInit
+      - ImpactAnalysis
+      - Languages
+      - Finish
+
+  # ── Single-file build ─────────────────────────────────────────────────────
+  - lifecycle: file
+    tasks:
+      - Start
+      - ScannerInit
+      - MetadataInit
+      - FileAnalysis
+      - Languages
+      - Finish
+
+  # ── IDE user build ────────────────────────────────────────────────────────
+  - lifecycle: user
+    variables:
+      - name: userbuild
+        value: true
+    cli:
+      usage: dbb build user [arguments] [options]
+      options:
+        - longOption: "dependencyFile"
+          hasArg: true
+          description: "JSON dependency file provided by an IDE used to skip the execution of the DBB scanner."
+        - longOption: "errPrefix"
+          hasArg: true
+          description: "Error prefix for writing error feedback to the Remote Error List view."
+        - longOption: "debug"
+          hasArg: false
+          description: "Enables the debug options on load modules."
+    tasks:
+      - Start
+      - ScannerInit
+      - FileAnalysis
+      - Languages
+      - task: UnitTest
+        condition: ${STATUS} == 2 || ${STATUS} == 0
+      - Finish
+
+###############################################################
+# Task definitions
+###############################################################
+tasks:
+
+  - task: Start
+
+  - task: MetadataInit
+
+  - task: ScannerInit
+
+  - task: FileAnalysis
+
+  - task: FullAnalysis
+
+  - task: ImpactAnalysis
+    variables:
+      - name: impactQueryPatterns
+        value:
+          - languageExt: cobol
+            patterns: ["**/src/cobol/*.cbl"]
+            dependencyPatterns: ["**/src/copybook/*.cpy"]
+          - languageExt: bms
+            patterns: ["**/src/bms/*.bms"]
+            dependencyPatterns: []
+          - languageExt: link
+            patterns: ["**/src/link/*.lnk"]
+            dependencyPatterns: []
+
+  - task: Package
+    condition: ${STATUS} == 2 || ${STATUS} == 0
+
+  - task: Publish
+    condition: ${STATUS} == 2 || ${STATUS} == 0
+
+  - task: Finish
+
+  - stage: Languages
+    tasks:

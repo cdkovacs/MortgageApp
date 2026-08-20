@@ -1,0 +1,21 @@
+zowe.config.json
+README.md
+zowe.schema.json
+
+# Bob Z Extension - Local settings and generated files
+.bobz/
+
+# Bob Z Extension - Local data dictionary
+DD.json
+
+# ZCodeScan logs
+.bob/tmp/zcodescan*.log
+
+# macOS metadata
+.DS_Store
+
+# VS Code local settings
+.vscode/settings.json
+
+# DBB build logs and packages
+logs/

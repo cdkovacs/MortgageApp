@@ -1,0 +1,93 @@
+# Wazi Deploy - Package Build Outputs Definition
+# MortgageApplication
+#
+# Maps the DBB zAppBuild deployType values from the BuildReport to Wazi Deploy
+# artifact type names. This file tells Wazi Deploy what is in the deployment
+# package and how each artifact should be classified.
+#
+# DBB sets deployType on each build output based on the properties in
+# Cobol.properties, BMS.properties, and LinkEdit.properties:
+#   cobol_deployType=LOAD           → batch/non-CICS COBOL load modules
+#   cobol_deployTypeCICS=CICSLOAD   → CICS COBOL load modules
+#   bms_deployType=MAPLOAD          → BMS mapset load modules
+#   bms_copy_deployType=MAPCOPY     → BMS-generated COBOL DSECT copybooks
+#   linkedit_deployTypeCICS=CICSLOAD→ link-edit output CICS load module
+#
+# This file is passed to wazideploy-package when assembling the tar archive:
+#   wazideploy-package -b BuildReport.json -o package.tar \
+#                      --package-build-outputs package-build-outputs.yml
+#
+# Reference: https://www.ibm.com/docs/en/developer-for-zos/16.0?topic=deploy-package-build-outputs-file
+
+---
+# Artifact type definitions — maps deployType labels to Wazi Deploy types
+# and controls which member of the PDS the artifact is stored under.
+packageBuildOutputs:
+
+  # --------------------------------------------------------------------------
+  # CICSLOAD — CICS load modules
+  #
+  # Produced by:
+  #   epsmlist.lnk  → EPSMLIST  (CICS list front-end, linked with EPSMPMT)
+  #
+  # Note: epsmlist.cbl compiles to an object deck only (cobol_linkEdit=false).
+  #       The CICSLOAD artifact is produced by the LinkEdit step from
+  #       epsmlist.lnk which links EPSMPMT + EPSMLIST object deck.
+  # --------------------------------------------------------------------------
+  - type: CICSLOAD
+    artifactType: CICSLOAD
+    deployType: CICSLOAD
+    source:
+      type: pds
+
+  # --------------------------------------------------------------------------
+  # MAPLOAD — BMS mapset load modules
+  #
+  # Produced by:
+  #   epsmort.bms   → EPSMORT   (mortgage calculator 24x80 screen)
+  #   epsmlis.bms   → EPSMLIS   (mortgage rate list 24x80 screen, 8 rows)
+  # --------------------------------------------------------------------------
+  - type: MAPLOAD
+    artifactType: MAPLOAD
+    deployType: MAPLOAD
+    source:
+      type: pds
+
+  # --------------------------------------------------------------------------
+  # LOAD — standalone (non-CICS) load modules
+  #
+  # Produced by:
+  #   epscmort.cbl  → EPSCMORT  (mortgage detail — also has CICS entry point
+  #                               but deployType=LOAD because isSQL=true takes
+  #                               precedence; adjust to CICSLOAD if needed)
+  #   epscsmrd.cbl  → EPSCSMRD  (Web Services converter driver)
+  #   epscsmrt.cbl  → EPSCSMRT  (CICS calculation dispatcher — isCICS=true,
+  #                               deployType overridden to CICSLOAD in practice;
+  #                               update cobol_deployTypeCICS mapping if needed)
+  #   epsmpmt.cbl   → EPSMPMT   (monthly payment calculator — pure batch)
+  #
+  # Note: epsnbrvl.cbl produces an object deck only (cobol_linkEdit=false)
+  #       and is NOT included as a standalone artifact in the package.
+  #       It is statically linked into EPSMLIST via epsmlist.lnk.
+  # --------------------------------------------------------------------------
+  - type: LOAD
+    artifactType: LOAD
+    deployType: LOAD
+    source:
+      type: pds
+
+  # --------------------------------------------------------------------------
+  # MAPCOPY — BMS-generated COBOL DSECT copybooks
+  #
+  # Produced by the SYSPARM(DSECT) pass of BMS assembly:
+  #   epsmort.bms   → EPSMORT copybook (DSECT for map fields)
+  #   epsmlis.bms   → EPSMLIS copybook (DSECT for map fields)
+  #
+  # Deployed to the copybook library so that downstream compilations can
+  # include the generated DSECT via COPY EPSMORT / COPY EPSMLIS.
+  # --------------------------------------------------------------------------
+  - type: MAPCOPY
+    artifactType: MAPCOPY
+    deployType: MAPCOPY
+    source:
+      type: pds

@@ -1,0 +1,49 @@
+################################################################
+# LICENSED MATERIALS - PROPERTY OF IBM
+# "RESTRICTED MATERIALS OF IBM"
+# (C) COPYRIGHT IBM CORPORATION 2020, 2025. ALL RIGHTS RESERVED
+# US GOVERNMENT USERS RESTRICTED RIGHTS - USE, DUPLICATION,
+# OR DISCLOSURE RESTRICTED BY GSA ADP SCHEDULE
+# CONTRACT WITH IBM CORPORATION
+################################################################
+
+version: 1.0.0
+
+application:
+  # Must match the application name used in the zBuilder workspace on USS.
+  # Z Open Editor uses this name when creating the DBB workspace directory
+  # and when writing the dbb-app.yaml to USS before invoking the build.
+  name: MortgageApplication-zBuilder
+
+  tasks:
+
+    # -------------------------------------------------------------------------
+    # BMS maps — assembled before COBOL so DSECTs are available
+    # -------------------------------------------------------------------------
+    - task: BMS
+      sources:
+        - "**/src/bms/*.bms"
+
+    # -------------------------------------------------------------------------
+    # COBOL programs (includes CICS programs — isCICS resolved by build-conf)
+    # -------------------------------------------------------------------------
+    - task: Cobol
+      sources:
+        - "**/src/cobol/*.cbl"
+        - "**/src/zunit/*.cbl"
+
+      variables:
+        - name: dependencySearchPath
+          value: "search:${WORKSPACE}/?path=${APP_DIR_NAME}/src/copybook/*.cpy"
+
+    # -------------------------------------------------------------------------
+    # Link-edit control cards
+    # -------------------------------------------------------------------------
+    - task: LinkEdit
+      sources:
+        - "**/src/link/*.lnk"
+
+      variables:
+        - name: hasCICSModules
+          value: true
+

@@ -1,0 +1,52 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/java
+{
+	"name": "Java",
+	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+	// "build": {
+	// 	// Path is relative to the devcontainer.json file.
+	// 	"dockerfile": "../Dockerfile"
+	// },
+	"image": "mcr.microsoft.com/devcontainers/java:1-21-bookworm",
+	"features": {
+		"ghcr.io/devcontainers/features/java:1": {
+			"version": "none",
+			"installMaven": "true",
+			"installGradle": "true"
+		},
+		"ghcr.io/devcontainers/features/node:1": {
+			"nodeGypDependencies": true,
+			"version": "22",
+			"nvmVersion": "latest"
+		}
+	},
+	// Use 'forwardPorts' to make a list of ports inside the container available locally.
+	// "forwardPorts": [],
+	// Use 'postCreateCommand' to run commands after the container is created.
+	"postCreateCommand": "npm install -g @zowe/cli@8 && corepack enable yarn",
+	// Configure tool-specific properties.
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ibm.zopeneditor",
+				"zowe.vscode-extension-for-zowe",
+				"redhat.vscode-yaml",
+				"vscjava.vscode-java-pack",
+				"ms-azuretools.vscode-docker",
+				"bitlang.cobol-themes"
+			],
+			"settings": {
+				"editor.fontFamily": "IBM 3270",
+				// "editor.fontSize": 17,
+				// "editor.fontWeight": "bold",
+				"terminal.integrated.fontFamily": "Consolas",
+				"workbench.colorTheme": "Throwback (ISPF Inspired)",
+				"editor.formatOnSave": true,
+				"java.configuration.updateBuildConfiguration": "interactive",
+				"zowe.security.secureCredentialsEnabled": false
+			}
+		}
+	}
+	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+	// "remoteUser": "root"
+}
